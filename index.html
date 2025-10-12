@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="dynamic-title">神魔夾娃娃遊戲生成神器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 JSZip 和 FileSaver 函式庫用於生成 ZIP 檔案 (僅供生成器使用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- 引入 Font Awesome 函式庫 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        
+        /* 預設神魔主題配色 */
+        :root {
+            --machine-color-primary: #2c2c54;    /* 機臺邊框/深色元素 (Dark Blue) */
+            --machine-color-secondary: #ff6b6b;  /* 按鈕/裝飾 (Red) */
+            --interface-color-bg: #4a69bd;       /* 頁面背景 (Primary Blue) */
+            --interface-color-accent: #feca57;   /* 標題/強調色 (Orange) */
+            --info-color-panel: #ff9ff3;         /* 狀態面板 (Pink) */
+            --token-panel-bg: #feca57;           /* 代幣面板背景 */
+            --score-panel-bg: #ff6b6b;           /* 分數面板背景 */
+            --text-color-dark: #2c2c54;
+            --claw-color: #8c8c8c;               /* 爪子顏色 */
+        }
+
+        body {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            font-family: 'Inter', 'Arial', sans-serif;
+            background: var(--interface-color-bg);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column; /* Changed to column to stack elements naturally */
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        .overall-container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            gap: 20px;
+        }
+
+        .main-page-title { /* 用於生成器頁面最上方的標題 */
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 900;
+            color: var(--interface-color-accent);
+            text-shadow: 4px 4px var(--machine-color-primary);
+            text-align: center;
+            line-height: 1.2;
+            margin-bottom: 20px;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 20px;
+        }
+
+        .game-title { /* 遊戲機臺本身的標題 */
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 900;
+            color: var(--interface-color-accent);
+            text-shadow: 4px 4px var(--machine-color-primary);
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        .game-area {
+            width: 100%;
+            max-width: 750px;
+            background: #fff;
+            border: 10px solid var(--machine-color-primary);
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Claw Machine Display */
+        .display-box {
+            position: relative;
+            height: 350px;
+            background: linear-gradient(to bottom, #a0d2eb, #e4f1f7);
+            border-bottom: 5px solid var(--machine-color-primary);
+            overflow: hidden;
+        }
+
+        /* Claw components now directly inside display-box and moved by JS */
+        /* They all share common positioning properties */
+        .claw, .claw-arm, .claw-cable {
+            position: absolute;
+            left: 50%; /* Initial center position, will be updated by JS */
+            transform: translateX(-50%); /* Visually center the element around its left position */
+        }
+        /* Only claw needs grab animation for top and transform */
+        .claw {
+            transition: transform 0.5s ease-in-out, top 0.5s ease-in-out; 
+        }
+
+        /* 爪子本身 (主體) */
+        .claw {
+            width: 60px; /* 爪子主體寬度 */
+            height: 25px; /* 爪子主體高度 */
+            background-color: var(--claw-color);
+            border: 3px solid #4d4d4d;
+            border-radius: 6px; /* 稍微圓角的矩形 */
+            top: 10px; /* 距離頂部的初始位置 */
+            z-index: 10;
+            
+            /* 用於定位偽元素的基準，雖然不再 flex，但保留以防萬一 */
+            overflow: visible; /* 確保偽元素不被裁剪 */
+        }
+
+        .claw.grabbing {
+            transition: top 0.5s ease-in, transform 0.1s ease-in-out; /* 抓取時不再有 left 過渡 */
+        }
+
+        /* 爪子的抓手部分 (偽元素) */
+        .claw::before,
+        .claw::after {
+            content: '';
+            position: absolute; /* 相對於 .claw 定位 */
+            width: 10px; /* 抓手寬度 */
+            height: 35px; /* 抓手長度 */
+            background-color: var(--claw-color);
+            border: 2px solid #4d4d4d;
+            border-radius: 0 0 5px 5px; /* 底部圓角 */
+            transform-origin: top center; /* 旋轉中心在頂部 */
+            transition: transform 0.3s ease-in-out; /* 抓取時的平滑動畫 */
+        }
+
+        .claw::before {
+            left: 0; /* 左抓手對齊 .claw 的左邊緣 */
+            top: 25px; /* 從 .claw 主體的底部開始延伸 */
+            transform: rotate(-25deg); /* 初始張開狀態 */
+        }
+
+        .claw::after {
+            right: 0; /* 右抓手對齊 .claw 的右邊緣 */
+            top: 25px; /* 從 .claw 主體的底部開始延伸 */
+            transform: rotate(25deg); /* 初始張開狀態 */
+        }
+
+        .claw.grabbing::before {
+            transform: rotate(-5deg); /* 抓取時閉合狀態 */
+        }
+
+        .claw.grabbing::after {
+            transform: rotate(5deg); /* 抓取時閉合狀態 */
+        }
+
+        .claw-arm {
+            width: 5px;
+            height: 10px; /* 調整高度以連接到爪子主體 */
+            background-color: var(--claw-color);
+            top: 0px; /* 連接到爪子主體頂部 */
+            z-index: 9;
+        }
+
+        .claw-cable {
+            width: 2px;
+            background-color: #666;
+            top: -300px; /* Cable length */
+            height: 300px;
+            z-index: 8;
+        }
+        
+        /* Prize Area */
+        .prize-area {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            height: 60px;
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            padding-bottom: 10px;
+            z-index: 5;
+        }
+
+        .prize-item {
+            width: 60px;
+            height: 60px;
+            border-radius: 8px;
+            background: #f8f8f8;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .prize-item:hover {
+            transform: translateY(-2px);
+        }
+
+        .prize-item-content {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2.5rem; /* For emojis */
+        }
+        .prize-item-content.is-img {
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            padding: 15px;
+            background: var(--machine-color-primary);
+            display: flex;
+            justify-content: space-between; /* 使按鈕分散對齊 */
+            align-items: center;
+            border-radius: 0 0 10px 10px;
+            gap: 10px; /* 使用 gap 代替個別按鈕的 margin */
+            flex-wrap: wrap; /* 允許在小螢幕上換行 */
+        }
+
+        .control-button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background-color 0.1s, transform 0.1s, box-shadow 0.1s;
+            box-shadow: 0 4px #0000004d;
+            white-space: nowrap; /* 防止按鈕文字換行 */
+        }
+
+        .control-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #0000004d;
+        }
+        .control-button i {
+            margin-right: 5px; /* Space between icon and text */
+        }
+        .control-button i:last-child {
+            margin-right: 0;
+            margin-left: 5px; /* Space for right arrow */
+        }
+
+
+        #move-left, #move-right {
+            background-color: var(--machine-color-secondary);
+            color: white;
+            border: 2px solid color-mix(in srgb, var(--machine-color-secondary) 80%, black);
+            flex-grow: 1; /* 讓左右按鈕可以稍微伸展 */
+            /* 移除 max-width，讓 flex-grow 和 flex-basis 在響應式時更好地運作 */
+        }
+        #move-left:disabled, #move-right:disabled {
+            background-color: color-mix(in srgb, var(--machine-color-secondary) 50%, white);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #grab-btn {
+            background-color: var(--interface-color-accent);
+            color: var(--text-color-dark);
+            border: 2px solid color-mix(in srgb, var(--interface-color-accent) 80%, black);
+            font-size: 1.1rem;
+            padding: 12px 25px;
+            margin: 0; /* 移除 margin，使用 controls 的 gap */
+            flex-grow: 2; /* 讓抓取按鈕可以佔據更多空間 */
+            max-width: 200px;
+        }
+        #grab-btn:disabled {
+            background-color: color-mix(in srgb, var(--interface-color-accent) 50%, white);
+            color: color-mix(in srgb, var(--text-color-dark) 50%, white);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        /* Token and Score Panel Styling */
+        .token-panel {
+            background-color: var(--token-panel-bg);
+            color: var(--text-color-dark);
+        }
+        .score-panel {
+            background-color: var(--score-panel-bg);
+            color: white; /* 分數通常是白色文字，跟背景色對比 */
+        }
+
+        /* Full Screen Display for Prize Message */
+        #full-screen-display {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #full-screen-display.is-active {
+            display: flex;
+        }
+        
+        #full-screen-message {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 900;
+            text-shadow: 0 0 10px black;
+            text-align: center;
+        }
+
+        .prize-grab-animation {
+            animation: zoomIn 1.5s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards;
+        }
+
+        @keyframes zoomIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Grabbed Prizes Area */
+        .grabbed-prizes-section {
+            width: 100%;
+            max-width: 750px;
+            background: var(--machine-color-primary);
+            color: white;
+            padding: 15px;
+            border-radius: 15px;
+            border: 5px solid var(--interface-color-accent);
+        }
+        
+        #grabbed-prizes-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            min-height: 70px;
+            padding: 10px 0;
+            justify-content: center;
+        }
+        
+        .grabbed-prizes-section h2 {
+            font-size: 1.5rem;
+            color: var(--info-color-panel);
+            text-align: center;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px 2px #000;
+        }
+
+        /* GENERATOR STYLES (會被移除於下載版) */
+        .generator-toggle {
+            background-color: var(--interface-color-accent);
+            color: var(--text-color-dark);
+            padding: 10px 15px;
+            border: 3px solid var(--machine-color-primary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .generator-toggle:hover {
+            background-color: color-mix(in srgb, var(--interface-color-accent) 80%, white);
+        }
+
+        .generator-panel {
+            width: 100%;
+            max-width: 750px;
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            border: 5px solid var(--machine-color-primary);
+            display: none; /* Starts hidden */
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .generator-panel.is-open {
+            display: flex;
+        }
+
+        /* generator panel H2/H3 styles */
+        .generator-panel h2 {
+            text-align: center; /* 讓遊戲參數設定標題置中 */
+        }
+        .config-group {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .config-group h3 {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: var(--text-color-dark);
+            margin-bottom: 10px;
+        }
+        .config-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .config-item {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            min-width: 150px;
+        }
+        .config-item input {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        /* Theme selection buttons */
+        .theme-button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s, outline 0.1s;
+            outline: 2px solid transparent; /* Default outline */
+        }
+        .theme-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .theme-button.selected-theme {
+            outline: 3px solid var(--interface-color-accent); /* 框選特效 */
+            box-shadow: 0 0 0 2px var(--machine-color-primary); /* 外層陰影 */
+        }
+
+        /* Apply Settings Button specific style */
+        #apply-settings-btn {
+            background-color: lightgray; /* 淺灰色 */
+            color: #333; /* 深色文字 */
+            border: 2px solid #a0a0a0; /* 灰色邊框 */
+            box-shadow: 0 4px #7a7a7a4d; /* 調整陰影顏色以配合淺色按鈕 */
+        }
+        #apply-settings-btn:active {
+            background-color: #c0c0c0; /* 按下時更深的灰色 */
+            transform: translateY(2px);
+            box-shadow: 0 2px #7a7a7a4d;
+        }
+
+        #prize-json-input {
+            width: 100%;
+            min-height: 250px;
+            padding: 10px;
+            border: 2px solid var(--interface-color-bg);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+            white-space: pre;
+            overflow-wrap: normal;
+            overflow-x: auto;
+        }
+
+        #download-zip-btn {
+            background-color: #20bf6b; /* Green for download */
+            color: white;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            margin-top: 10px;
+        }
+        #download-zip-btn:hover {
+            background-color: #199c58;
+        }
+
+        .generator-message {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-weight: bold;
+            min-height: 20px;
+        }
+
+        .generator-message.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .generator-message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        /* 吉祥物樣式 */
+        .liyuchill-mascot {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            width: 120px; /* 尺寸放大1.5倍 */
+            height: 120px; /* 尺寸放大1.5倍 */
+            cursor: pointer;
+            transition: transform 0.2s ease-in-out;
+            display: none; /* 預設隱藏，僅在生成器頁面顯示 */
+        }
+        .liyuchill-mascot img {
+            width: 100%;
+            height: 100%;
+            /* filter: grayscale(100%) brightness(0.7); /* 預設灰階暗淡 - 移除此行，讓圖片顯示正常色 */
+            transition: filter 0.5s ease-in-out;
+        }
+
+        .liyuchill-mascot:hover {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+            transform: translate3d(0, 0, 0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+        }
+
+        .liyuchill-mascot:hover img {
+            filter: none; /* 確保懸停時移除任何預設濾鏡 */
+            animation: neon-glow 1.5s ease-in-out infinite alternate; /* 霓虹燈光動畫 */
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+
+        @keyframes neon-glow {
+            0% {
+                filter: hue-rotate(0deg) drop-shadow(0 0 5px #fff) drop-shadow(0 0 10px #f0f);
+            }
+            100% {
+                filter: hue-rotate(360deg) drop-shadow(0 0 10px #fff) drop-shadow(0 0 20px #0ff);
+            }
+        }
+
+        /* 響應式調整 */
+        @media (max-width: 640px) { /* Small screens */
+            .controls {
+                flex-direction: row; /* 保持水平排列，但允許換行 */
+                justify-content: center;
+            }
+            #move-left, #move-right, #grab-btn {
+                flex-basis: auto; /* 讓它們根據內容和 flex-grow 調整大小 */
+            }
+            #grab-btn {
+                order: 3; /* 在小螢幕上將抓取按鈕移到最後 */
+                flex-basis: 100%; /* 讓它佔滿一行 */
+                max-width: none; /* 取消最大寬度限制 */
+            }
+            #move-left { order: 1; }
+            #move-right { order: 2; }
+        }
+
+        @media (max-width: 480px) { /* Extra small screens */
+            .control-button {
+                padding: 8px 12px; /* 更小的內邊距 */
+                font-size: 0.9rem; /* 更小的字體 */
+            }
+            #grab-btn {
+                padding: 10px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="overall-container">
+
+        <!-- 生成器主標題 (僅在生成器頁面顯示，下載時移除) -->
+        <h1 class="main-page-title" id="main-generator-title">
+            神魔夾娃娃遊戲生成神器
+        </h1>
+        
+        <!-- GENERATOR TOOL START (僅在生成器頁面顯示，下載時移除) -->
+        <button id="generator-toggle" class="generator-toggle"><i class="fa-solid fa-gear"></i> 編輯介面 (點擊展開)</button>
+        <div id="generator-panel" class="generator-panel">
+            <h2 class="text-xl font-bold text-dark-blue-text mb-4 text-center"><i class="fa-solid fa-cog mr-2"></i>遊戲參數設定</h2>
+
+            <!-- 1. 介面與外觀設定 -->
+            <div class="config-group">
+                <h3><i class="fa-solid fa-palette mr-2"></i>介面與外觀</h3>
+                <div class="config-row">
+                    <div class="config-item w-full">
+                        <label for="game-title-input">遊戲標題:</label>
+                        <input type="text" id="game-title-input" value="夾娃娃機遊戲系統">
+                    </div>
+                    <div class="config-item w-full">
+                        <label for="footer-text-input">頁尾版權文字:</label>
+                        <input type="text" id="footer-text-input" value="Copyright © Liyuchiutiger Gongminshen">
+                    </div>
+                    <div class="config-item w-full">
+                        <label class="block mb-2 font-bold">選擇配色風格:</label>
+                        <div id="theme-buttons" class="flex flex-wrap gap-2">
+                            <!-- Theme buttons will be generated here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 遊戲數值設定 -->
+            <div class="config-group">
+                <h3><i class="fa-solid fa-calculator mr-2"></i>遊戲數值設定</h3>
+                <div class="config-row">
+                    <div class="config-item">
+                        <label for="initial-tokens-input">初始代幣數量:</label>
+                        <input type="number" id="initial-tokens-input" min="1" step="1" value="5">
+                    </div>
+                    <div class="config-item">
+                        <label for="grab-cost-input">每次夾取費用 (代幣):</label>
+                        <input type="number" id="grab-cost-input" min="1" step="1" value="1">
+                    </div>
+                    <div class="config-item">
+                        <label for="success-rate-input">夾取成功率 (%):</label>
+                        <input type="number" id="success-rate-input" min="0" max="100" step="5" value="70">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 娃娃池設定 -->
+            <div class="config-group">
+                <h3><i class="fa-solid fa-box-open mr-2"></i>娃娃池設定 (JSON 格式)</h3>
+                <p class="text-sm text-gray-600 mb-2">
+                    **asset** 欄位可填寫圖片網址 (URL) 或單一表情符號/符號 (Emoji/Symbol)。<br>
+                    **rate** 必須是 $0$ 到 $1$ 之間的小數。總機率會自動按比例調整。
+                </p>
+                <textarea id="prize-json-input" rows="10" placeholder="[
+    { &quot;name&quot;: &quot;魔法石&quot;, &quot;rate&quot;: 0.01, &quot;asset&quot;: &quot;💎&quot;, &quot;score&quot;: 500 },
+    { &quot;name&quot;: &quot;萬年靈魂石&quot;, &quot;rate&quot;: 0.05, &quot;asset&quot;: &quot;https://placehold.co/60x60/feca57/000000?text=魂&quot;, &quot;score&quot;: 100 },
+    { &quot;name&quot;: &quot;體力回復劑&quot;, &quot;rate&quot;: 0.1, &quot;asset&quot;: &quot;💉&quot;, &quot;score&quot;: 50 }
+]"></textarea>
+            </div>
+
+            <button id="apply-settings-btn" class="control-button">套用所有設定並重置遊戲</button>
+            <button id="download-zip-btn" class="control-button"><i class="fa-solid fa-download"></i> 下載遊戲 (.zip)</button>
+            <div id="generator-message" class="generator-message"></div>
+        </div>
+        <!-- GENERATOR TOOL END -->
+
+        <!-- GAME SECTION START -->
+        <div class="game-container">
+            <h1 id="game-title" class="game-title">
+                神魔夾娃娃機
+            </h1>
+            
+            <!-- SCORES AND TOKENS DISPLAY -->
+            <div class="w-full max-w-750px flex justify-center gap-4 text-white font-bold">
+                <div class="p-2 rounded-lg shadow-md flex-1 text-center token-panel">
+                    代幣: <span id="token-display">5</span>
+                </div>
+                <div class="p-2 rounded-lg shadow-md flex-1 text-center score-panel">
+                    分數: <span id="score-display">0</span>
+                </div>
+            </div>
+
+            <div class="game-area">
+                <div class="display-box">
+                    <!-- Claw components are now direct children of display-box -->
+                    <div id="claw-cable" class="claw-cable"></div>
+                    <div id="claw-arm" class="claw-arm"></div>
+                    <div id="claw" class="claw"></div> 
+
+                    <!-- Prize Area -->
+                    <div id="prize-area" class="prize-area">
+                        <!-- Prizes will be generated here -->
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="move-left" class="control-button"><i class="fa-solid fa-arrow-left"></i> 向左 (A)</button>
+                    <!-- 抓取按鈕移到中間，並移除 game-status 顯示 -->
+                    <button id="grab-btn" class="control-button" disabled>抓取 (-1代幣)</button>
+                    <button id="move-right" class="control-button">向右 (D) <i class="fa-solid fa-arrow-right"></i></button>
+                </div>
+            </div>
+            
+            <div class="grabbed-prizes-section">
+                <h2>已夾取的娃娃</h2>
+                <div id="grabbed-prizes-list">
+                    <!-- Grabbed prizes items will appear here -->
+                </div>
+            </div>
+            
+            <footer id="game-footer" class="text-center text-sm text-white/70 mt-5">
+                Copyright © Liyuchiutiger Gongminshen
+            </footer>
+        </div>
+        <!-- GAME SECTION END -->
+    </div>
+
+    <!-- Full Screen Display for Prize Announcement (Replaces alert()) -->
+    <div id="full-screen-display">
+        <div id="full-screen-message"></div>
+    </div>
+
+    <!-- 吉祥物 -->
+    <div id="liyuchill-mascot" class="liyuchill-mascot">
+        <img src="image/LiyuChillGuy.svg" alt="LiyuChillGuy Mascot">
+    </div>
+
+    <!-- 生成器頁面專屬版權 (放在 body 最底部) -->
+    <footer id="generator-copyright" class="text-center text-xs text-yellow-500 mt-10 p-2">
+        Copyright © Liyuchiutiger Gongminshen
+    </footer>
+
+    <script>
+        // --- CONFIGURATION DEFAULTS ---
+        let gameConfig = {
+            title: "夾娃娃機遊戲系統",
+            footerText: "Copyright © Liyuchiutiger Gongminshen",
+            initialTokens: 5,
+            grabCost: 1,
+            successRate: 70, // Percentage
+            theme: "gods_and_demons"
+        };
+        
+        let userStats = {
+            tokens: 0, // Will be set to initialTokens on init
+            score: 0
+        };
+
+        // Updated PRIZE_POOL with 'asset' key and examples of URL and Emoji
+        let PRIZE_POOL = [
+            { name: "水鑽石", rate: 0.01, asset: "💎", score: 500 },
+            { name: "公民好神", rate: 0.05, asset: "https://gongminshenliyuchiutiger.github.io/__public-useful__/image/LiyuChill.svg", score: 100 },
+            { name: "黃金虎", rate: 0.1, asset: "🐯", score: 50 },
+            { name: "大發財", rate: 0.3, asset: "💰", score: 10 },
+            { name: "幸運草", rate: 0.54, asset: "🍀", score: 5 },
+            { name: "快樂鯉魚", rate: 0.54, asset: "🐟", score: 5 },
+        ];
+        
+        // --- GAME CONSTANTS ---
+        let CUMULATIVE_RATES = [];
+        const CLAW_SPEED = 0.5; // Percentage of display-box width per frame
+        // MIN_CLAW_X 和 MAX_CLAW_X 將被動態計算，以確保爪子的邊緣貼合邊界。
+
+        const gameStates = {
+            IDLE: '移動中...',
+            GRABBING: '抓取中...',
+            RETURN: '返回中...',
+            PRIZE_ANNOUNCE: '公佈獎勵...',
+            DISABLED: '請稍候...'
+        };
+
+        let currentGameState = gameStates.DISABLED;
+        let clawX = 50; // Initial percentage position (center)
+        let clawMoveDirection = 0; // -1 for left, 1 for right, 0 for idle
+        let animationFrameId = null;
+        let gameInitialized = false;
+
+        // --- DOM ELEMENTS ---
+        const clawElement = document.getElementById('claw');
+        const clawArmElement = document.getElementById('claw-arm'); // Reference to the arm element
+        const clawCableElement = document.getElementById('claw-cable'); // Reference to the cable element
+        const prizeArea = document.getElementById('prize-area');
+        const grabBtn = document.getElementById('grab-btn');
+        const moveLeftBtn = document.getElementById('move-left');
+        const moveRightBtn = document.getElementById('move-right');
+        const grabbedPrizesList = document.getElementById('grabbed-prizes-list');
+        const fullScreenDisplay = document.getElementById('full-screen-display');
+        const fullScreenMessage = document.getElementById('full-screen-message');
+        const tokenDisplay = document.getElementById('token-display');
+        const scoreDisplay = document.getElementById('score-display');
+        const gameTitleElement = document.getElementById('game-title'); // 遊戲機臺本身的標題
+        const dynamicTitleElement = document.getElementById('dynamic-title'); // <head> 裡的 <title>
+        const gameFooterElement = document.getElementById('game-footer');
+        const tokenPanelElement = document.querySelector('.token-panel'); // 代幣面板
+        const scorePanelElement = document.querySelector('.score-panel'); // 分數面板
+        
+        // --- AUDIO SETUP ---
+        let audioContext;
+        let synth;
+
+        function initAudio() {
+            // 移除這裡的 if (audioContext) return; 檢查，以確保在下載版中音頻總能初始化
+            // if (audioContext) return; 
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                const gainNode = audioContext.createGain();
+                gainNode.gain.value = 0.1; 
+                gainNode.connect(audioContext.destination);
+
+                synth = {
+                    play: (frequency, duration) => {
+                        const oscillator = audioContext.createOscillator();
+                        oscillator.type = 'square';
+                        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+                        oscillator.connect(gainNode);
+                        oscillator.start();
+                        oscillator.stop(audioContext.currentTime + duration);
+                    }
+                };
+            } catch (e) {
+                console.warn('Audio initialization failed. If running in an iframe, this is expected.', e);
+                synth = { play: () => {} };
+            }
+        }
+
+
+        // --- CORE GAME LOGIC ---
+
+        function updateClawPosition(deltaX) {
+            const displayBox = document.querySelector('.display-box');
+            if (!displayBox || !clawElement) return; // Prevent errors if elements not found
+
+            const displayBoxWidth = displayBox.offsetWidth;
+            const clawWidth = clawElement.offsetWidth; // 獲取爪子元素的像素寬度
+            
+            // 計算爪子一半寬度佔 display-box 總寬度的百分比
+            // clawX represents the center of the claw.
+            // When clawX is at `halfClawWidthPercent`, the left edge of the claw is at 0%.
+            // When clawX is at `100 - halfClawWidthPercent`, the right edge of the claw is at 100%.
+            const halfClawWidthPercent = (clawWidth / 2 / displayBoxWidth) * 100;
+
+            // 如果 clawWidth 為 0 (例如，元素尚未渲染或隱藏)，則設定一個安全的預設值以避免 NaN
+            if (isNaN(halfClawWidthPercent) || halfClawWidthPercent === 0) {
+                // 如果計算失敗，我們可能需要暫時設定一個固定範圍
+                // 或者延遲執行直到元素有實際寬度
+                // 這裡我們直接返回，等到下次 frame 再重新計算
+                // console.warn("Claw width is 0 or invalid, skipping positioning update."); // 移除過於頻繁的警告
+                return; 
+            }
+
+            // 根據爪子半寬度調整最小和最大百分比位置，使爪子的邊緣貼合 display-box 的邊界
+            const minClawXAdjusted = halfClawWidthPercent;
+            const maxClawXAdjusted = 100 - halfClawWidthPercent;
+
+            clawX += deltaX;
+            clawX = Math.max(minClawXAdjusted, Math.min(maxClawXAdjusted, clawX));
+            
+            // 更新所有爪子組件的水平位置
+            clawElement.style.left = `${clawX}%`;
+            clawArmElement.style.left = `${clawX}%`;
+            clawCableElement.style.left = `${clawX}%`;
+        }
+
+        function gameLoop() {
+            if (currentGameState === gameStates.IDLE && clawMoveDirection !== 0) {
+                const moveAmount = clawMoveDirection * CLAW_SPEED; 
+                updateClawPosition(moveAmount);
+            }
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+        
+        function updateStatsDisplay() {
+            tokenDisplay.textContent = userStats.tokens;
+            scoreDisplay.textContent = userStats.score;
+            
+            // 更新抓取按鈕文字，顯示費用
+            grabBtn.textContent = `抓取 (-${gameConfig.grabCost} 代幣)`;
+
+            // 根據代幣數量啟用或禁用抓取按鈕
+            if (userStats.tokens < gameConfig.grabCost) {
+                grabBtn.disabled = true;
+            } else {
+                grabBtn.disabled = currentGameState !== gameStates.IDLE;
+            }
+        }
+
+        function setGameState(state) {
+            currentGameState = state;
+            
+            const isIdle = state === gameStates.IDLE;
+            moveLeftBtn.disabled = !isIdle;
+            moveRightBtn.disabled = !isIdle;
+            
+            // 抓取按鈕只有在 IDLE 狀態且代幣足夠時才啟用
+            grabBtn.disabled = !isIdle || userStats.tokens < gameConfig.grabCost;
+            
+            updateStatsDisplay(); // 更新按鈕文字和代幣分數顯示
+        }
+
+        function moveClaw(direction) {
+            initAudio();
+            if (currentGameState !== gameStates.IDLE) return;
+
+            if (direction === 'left') {
+                clawMoveDirection = -1;
+            } else if (direction === 'right') {
+                clawMoveDirection = 1;
+            }
+        }
+
+        function stopMove() {
+            clawMoveDirection = 0;
+        }
+
+        function grabPrize() {
+            initAudio();
+            if (currentGameState !== gameStates.IDLE || userStats.tokens < gameConfig.grabCost) return;
+            
+            // Deduct cost
+            userStats.tokens -= gameConfig.grabCost;
+            updateStatsDisplay();
+
+            setGameState(gameStates.GRABBING);
+            synth.play(440, 0.2); // Grab sound
+
+            // Stop horizontal movement animation
+            cancelAnimationFrame(animationFrameId);
+            clawMoveDirection = 0;
+
+            // Start vertical movement animation
+            clawElement.classList.add('grabbing');
+            clawElement.style.top = '270px'; // Move down to prize level
+
+            // Prize determination after a short delay (simulating physical grab)
+            setTimeout(() => {
+                const prize = determinePrize();
+                const successRate = gameConfig.successRate / 100;
+                const isSuccess = Math.random() < successRate;
+
+                if (isSuccess) {
+                    processSuccessfulGrab(prize);
+                } else {
+                    processFailedGrab();
+                }
+
+            }, 500); // Time to move down
+        }
+
+        function determinePrize() {
+            const r = Math.random();
+            const prizeIndex = CUMULATIVE_RATES.findIndex(cumulativeRate => r <= cumulativeRate);
+            // Fallback for safety
+            return PRIZE_POOL[prizeIndex >= 0 ? prizeIndex : PRIZE_POOL.length - 1]; 
+        }
+
+        // Helper function to check if asset is a URL or a symbol
+        function isUrl(asset) {
+            return asset && (asset.startsWith('http://') || asset.startsWith('https://'));
+        }
+        
+        function processSuccessfulGrab(prize) {
+            synth.play(523, 0.5); // Success sound (C5)
+            setGameState(gameStates.PRIZE_ANNOUNCE);
+            
+            // Update score
+            userStats.score += prize.score;
+            updateStatsDisplay();
+
+            // Claw returns with prize
+            clawElement.style.top = '10px';
+            
+            // Show full screen announcement
+            setTimeout(() => {
+                showPrizeAnnouncement(prize.asset, prize.name, prize.score, true);
+                // Claw returns to idle position
+                setTimeout(resetGame, 1000); 
+            }, 500);
+        }
+
+        function processFailedGrab() {
+            synth.play(261, 0.5); // Fail sound (C4)
+            setGameState(gameStates.RETURN);
+            
+            // Claw returns empty
+            setTimeout(() => {
+                clawElement.style.top = '10px';
+                showPrizeAnnouncement('', '抓取失敗！獎品從爪子溜走了...😭', 0, false);
+                setTimeout(resetGame, 1000); 
+            }, 500);
+        }
+
+        function resetGame() {
+            clawElement.classList.remove('grabbing');
+            setGameState(gameStates.IDLE);
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+        
+        // --- UTILITY FUNCTIONS ---
+        
+        function showPrizeAnnouncement(asset, prizeName, score, isSuccess) {
+            fullScreenMessage.innerHTML = ''; // Clear existing
+            
+            if (isSuccess) {
+                const prizeAssetContainer = document.createElement('div');
+                prizeAssetContainer.className = 'w-32 h-32 mx-auto mb-4 rounded-xl prize-grab-animation flex justify-center items-center bg-white/70';
+                
+                if (isUrl(asset)) {
+                    const prizeImage = document.createElement('img');
+                    prizeImage.src = asset;
+                    prizeImage.alt = prizeName;
+                    prizeImage.className = 'w-full h-full object-cover rounded-xl';
+                    prizeImage.onerror = () => prizeImage.src = `https://placehold.co/60x60/8c8c8c/ffffff?text=圖錯`;
+                    prizeAssetContainer.appendChild(prizeImage);
+                } else {
+                    prizeAssetContainer.textContent = asset;
+                    prizeAssetContainer.style.fontSize = '4rem';
+                    prizeAssetContainer.style.backgroundColor = 'transparent';
+                }
+                
+                const messageText = document.createElement('div');
+                messageText.className = 'p-4 bg-green-500/90 rounded-xl shadow-2xl text-white text-3xl font-bold';
+                messageText.innerHTML = `恭喜獲得：${prizeName}！<br><span class="text-xl">(獲得分數: +${score})</span>`;
+
+                fullScreenMessage.appendChild(prizeAssetContainer);
+                fullScreenMessage.appendChild(messageText);
+
+                addPrizeToGrabbedArea(asset, prizeName);
+
+            } else {
+                const messageText = document.createElement('div');
+                messageText.className = 'p-4 bg-red-500/90 rounded-xl shadow-2xl text-white text-3xl font-bold';
+                messageText.textContent = prizeName; // Use the fail message directly
+                fullScreenMessage.appendChild(messageText);
+            }
+
+            fullScreenDisplay.classList.add('is-active');
+
+            const totalDisplayDuration = 2000; 
+
+            setTimeout(() => {
+                fullScreenDisplay.classList.remove('is-active');
+                fullScreenMessage.innerHTML = '';
+            }, totalDisplayDuration);
+        }
+
+        function addPrizeToGrabbedArea(asset, type) {
+            const prizeItem = document.createElement('div');
+            prizeItem.className = 'prize-item';
+            prizeItem.dataset.type = type;
+
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'prize-item-content';
+
+            if (isUrl(asset)) {
+                contentContainer.classList.add('is-img');
+                const img = document.createElement('img');
+                img.src = asset;
+                img.alt = type;
+                img.onerror = () => img.src = `https://placehold.co/60x60/8c8c8c/ffffff?text=圖錯`; // Fallback image
+                contentContainer.appendChild(img);
+            } else {
+                contentContainer.textContent = asset;
+            }
+            
+            prizeItem.appendChild(contentContainer);
+            grabbedPrizesList.appendChild(prizeItem);
+        }
+
+        // --- PRIZE POOL MANAGEMENT (GENERATOR CORE) ---
+
+        function initializePrizes() {
+            // Recalculate CUMULATIVE_RATES based on the current PRIZE_POOL
+            const totalRate = PRIZE_POOL.reduce((sum, prize) => sum + prize.rate, 0);
+            let currentCumulativeRate = 0;
+            CUMULATIVE_RATES = PRIZE_POOL.map(prize => {
+                currentCumulativeRate += prize.rate / totalRate;
+                return currentCumulativeRate;
+            });
+            console.log('Prize Pool initialized. Cumulative Rates:', CUMULATIVE_RATES);
+        }
+
+        function setupPrizes() {
+            // Clears and redraws the prize board
+            prizeArea.innerHTML = '';
+            
+            // Only display a subset of prizes for visual effect on the board
+            const displayCount = Math.min(PRIZE_POOL.length, 10);
+            for (let i = 0; i < displayCount; i++) {
+                // To show diversity, we pick randomly from the pool to display
+                const prize = PRIZE_POOL[Math.floor(Math.random() * PRIZE_POOL.length)];
+                
+                const prizeItem = document.createElement('div');
+                prizeItem.className = 'prize-item';
+                prizeItem.title = `${prize.name} (機率: ${(prize.rate * 100).toFixed(2)}%, 分數: ${prize.score})`;
+
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'prize-item-content';
+
+                if (isUrl(prize.asset)) {
+                    contentContainer.classList.add('is-img');
+                    const img = document.createElement('img');
+                    img.src = prize.asset;
+                    img.alt = prize.name;
+                    img.onerror = () => img.src = `https://placehold.co/60x60/8c8c8c/ffffff?text=圖錯`; // Fallback image
+                    contentContainer.appendChild(img);
+                } else {
+                    contentContainer.textContent = prize.asset;
+                }
+                
+                prizeItem.appendChild(contentContainer);
+
+
+                // Add random positioning within the prize area boundaries
+                const prizeAreaComputedWidth = prizeArea.offsetWidth;
+                const itemWidth = 70; // prize-item width + margin (60px + 10px)
+                const maxLeft = prizeAreaComputedWidth > itemWidth ? prizeAreaComputedWidth - itemWidth : 0;
+                const randomLeft = Math.floor(Math.random() * maxLeft);
+                
+                prizeItem.style.position = 'absolute';
+                prizeItem.style.left = `${randomLeft}px`;
+                prizeItem.style.bottom = '10px';
+                
+                prizeArea.appendChild(prizeItem);
+            }
+        }
+        
+        // --- GENERATOR TOOL SETUP (僅在生成器頁面呼叫) ---
+
+        const THEMES = {
+            gods_and_demons: {
+                'label': '神魔主題 (藍/紅/黃)',
+                '--machine-color-primary': '#2c2c54',
+                '--machine-color-secondary': '#ff6b6b',
+                '--interface-color-bg': '#4a69bd',
+                '--interface-color-accent': '#feca57',
+                '--info-color-panel': '#ff9ff3',
+                '--token-panel-bg': '#feca57',
+                '--score-panel-bg': '#ff6b6b',
+                '--text-color-dark': '#2c2c54',
+                '--claw-color': '#8c8c8c',
+                'buttonTextColor': 'white', // Explicitly set for button preview
+            },
+            arcade_neon: {
+                'label': '街機霓虹 (紫/綠/粉)',
+                '--machine-color-primary': '#2d004d',
+                '--machine-color-secondary': '#00ff7f',
+                '--interface-color-bg': '#330066',
+                '--interface-color-accent': '#ff69b4',
+                '--info-color-panel': '#87ceeb',
+                '--token-panel-bg': '#ff69b4',
+                '--score-panel-bg': '#00ff7f',
+                '--text-color-dark': '#1a0033',
+                '--claw-color': '#00b894',
+                'buttonTextColor': 'white',
+            },
+            classic_wood: {
+                'label': '經典木紋 (棕/金/白)',
+                '--machine-color-primary': '#5c4033',
+                '--machine-color-secondary': '#c7a31f',
+                '--interface-color-bg': '#8b4513',
+                '--interface-color-accent': '#f0e68c',
+                '--info-color-panel': '#ffffff',
+                '--token-panel-bg': '#f0e68c',
+                '--score-panel-bg': '#c7a31f',
+                '--text-color-dark': '#333333',
+                '--claw-color': '#7a675d',
+                'buttonTextColor': 'white',
+            },
+            pastoral_forest: {
+                'label': '田園森林',
+                '--machine-color-primary': '#386641',
+                '--machine-color-secondary': '#6a994e',
+                '--interface-color-bg': '#a7c4bc',
+                '--interface-color-accent': '#f4e3b2',
+                '--info-color-panel': '#f0f2eb',
+                '--token-panel-bg': '#d9b384',
+                '--score-panel-bg': '#4d7c0f',
+                '--text-color-dark': '#283618',
+                '--claw-color': '#555e52',
+                'buttonTextColor': '#283618', // dark text on light green
+            },
+            pink_bubble: {
+                'label': '粉紅泡泡',
+                '--machine-color-primary': '#6a0572',
+                '--machine-color-secondary': '#f72585',
+                '--interface-color-bg': '#ffc2d4',
+                '--interface-color-accent': '#e0b8d4',
+                '--info-color-panel': '#e6f7ff',
+                '--token-panel-bg': '#ffe0e9',
+                '--score-panel-bg': '#d9a9d2',
+                '--text-color-dark': '#4a0033',
+                '--claw-color': '#b87cbe',
+                'buttonTextColor': '#4a0033', // dark text on light pink
+            },
+            blue_water_pattern: {
+                'label': '藍色水紋',
+                '--machine-color-primary': '#004d66',
+                '--machine-color-secondary': '#00b8d4',
+                '--interface-color-bg': '#87ceeb',
+                '--interface-color-accent': '#ff6f61',
+                '--info-color-panel': '#ffffff',
+                '--token-panel-bg': '#ccf5ff',
+                '--score-panel-bg': '#66cdaa',
+                '--text-color-dark': '#00334d',
+                '--claw-color': '#4a6f87',
+                'buttonTextColor': '#00334d', // dark text on light blue
+            },
+            starlight_glitter: {
+                'label': '星光璀璨',
+                '--machine-color-primary': '#1a237e',
+                '--machine-color-secondary': '#ffd700',
+                '--interface-color-bg': '#311b92',
+                '--interface-color-accent': '#c0c0c0',
+                '--info-color-panel': '#ffffff',
+                '--token-panel-bg': '#fffacd',
+                '--score-panel-bg': '#a78bfa',
+                '--text-color-dark': '#0d1440',
+                '--claw-color': '#a3b1d4',
+                'buttonTextColor': 'white',
+            },
+            dazzling_sunlight: {
+                'label': '陽光耀眼',
+                '--machine-color-primary': '#ff8c00',
+                '--machine-color-secondary': '#ffeb3b',
+                '--interface-color-bg': '#87ceeb',
+                '--interface-color-accent': '#ffffff',
+                '--info-color-panel': '#ffffa0',
+                '--token-panel-bg': '#fffacd',
+                '--score-panel-bg': '#ffa07a',
+                '--text-color-dark': '#2196f3',
+                '--claw-color': '#ffb066',
+                'buttonTextColor': '#2196f3', // dark text on light blue
+            },
+            cool_grayscale: {
+                'label': '冷酷灰階',
+                '--machine-color-primary': '#343a40',
+                '--machine-color-secondary': '#6c757d',
+                '--interface-color-bg': '#dee2e6',
+                '--interface-color-accent': '#adb5bd',
+                '--info-color-panel': '#ffffff',
+                '--token-panel-bg': '#e9ecef',
+                '--score-panel-bg': '#495057',
+                '--text-color-dark': '#212529',
+                '--claw-color': '#8e949a',
+                'buttonTextColor': '#212529', // dark text on light gray
+            },
+            vibrant_rainbow: {
+                'label': '繽紛彩虹',
+                '--machine-color-primary': '#6a0dad',
+                '--machine-color-secondary': '#00bcd4',
+                '--interface-color-bg': '#9c27b0',
+                '--interface-color-accent': '#ffeb3b',
+                '--info-color-panel': '#e91e63',
+                '--token-panel-bg': '#ff9800',
+                '--score-panel-bg': '#4caf50',
+                '--text-color-dark': '#3f51b5',
+                '--claw-color': '#e0e0e0',
+                'buttonTextColor': 'white',
+            }
+        };
+
+        function applyTheme(themeName) {
+            const theme = THEMES[themeName];
+            if (!theme) return;
+            const root = document.documentElement;
+            for (const [key, value] of Object.entries(theme)) {
+                if (key !== 'label' && key !== 'buttonTextColor') { // 'label' and 'buttonTextColor' are not CSS variables
+                    root.style.setProperty(key, value);
+                }
+            }
+        }
+
+        function loadSettingsFromUI() {
+            // Load game settings
+            gameConfig.title = document.getElementById('game-title-input').value || "夾娃娃機";
+            gameConfig.footerText = document.getElementById('footer-text-input').value || "";
+            gameConfig.initialTokens = parseInt(document.getElementById('initial-tokens-input').value) || 1;
+            gameConfig.grabCost = parseInt(document.getElementById('grab-cost-input').value) || 1;
+            gameConfig.successRate = parseInt(document.getElementById('success-rate-input').value) || 50;
+            // gameConfig.theme 已經由按鈕點擊事件直接設定，無需從 UI 讀取
+        }
+
+        function applySettings() {
+            loadSettingsFromUI(); // Load current UI values into gameConfig
+
+            // 1. Apply UI changes
+            dynamicTitleElement.textContent = gameConfig.title; // Update browser tab title
+            gameTitleElement.textContent = gameConfig.title;    // Update game title on the page
+            gameFooterElement.textContent = gameConfig.footerText;
+            applyTheme(gameConfig.theme);
+
+            // 2. Reset Game Stats
+            userStats.tokens = gameConfig.initialTokens;
+            userStats.score = 0;
+            grabbedPrizesList.innerHTML = ''; // Clear prizes
+
+            // 3. Update Status
+            setGameState(gameStates.IDLE);
+        }
+        
+        function setupGenerator() {
+            const generatorToggle = document.getElementById('generator-toggle');
+            const generatorPanel = document.getElementById('generator-panel');
+            const prizeJsonInput = document.getElementById('prize-json-input');
+            const applySettingsBtn = document.getElementById('apply-settings-btn');
+            const downloadZipBtn = document.getElementById('download-zip-btn');
+            const generatorMessage = document.getElementById('generator-message');
+            const mainGeneratorTitle = document.getElementById('main-generator-title');
+            const themeButtonsContainer = document.getElementById('theme-buttons'); // 獲取主題按鈕容器
+            const generatorCopyright = document.getElementById('generator-copyright');
+            const mascotElement = document.getElementById('liyuchill-mascot');
+
+            // 顯示生成器相關元素
+            if (generatorCopyright) generatorCopyright.style.display = 'block';
+            if (mascotElement) mascotElement.style.display = 'block';
+
+            // 設定初始 JSON 內容作為預設獎品池
+            prizeJsonInput.value = JSON.stringify(PRIZE_POOL, null, 2);
+
+            // 移除舊的下拉式選單 (如果它還存在的話)
+            const oldThemeSelector = document.getElementById('theme-selector');
+            if (oldThemeSelector) oldThemeSelector.remove();
+
+            if (themeButtonsContainer) {
+                // 清空現有的按鈕，以防重複生成
+                themeButtonsContainer.innerHTML = ''; 
+
+                for (const themeKey in THEMES) {
+                    const theme = THEMES[themeKey];
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'theme-button p-2 rounded-md border-2 text-sm font-medium';
+                    button.textContent = theme.label;
+                    button.dataset.theme = themeKey;
+                    // 使用主題的顏色來預覽按鈕樣式
+                    button.style.backgroundColor = theme['--interface-color-bg'];
+                    button.style.color = theme.buttonTextColor; // 使用新增的 buttonTextColor
+                    button.style.borderColor = theme['--machine-color-primary'];
+
+                    button.addEventListener('click', () => {
+                        gameConfig.theme = themeKey; // 更新 gameConfig
+                        // 視覺上標記選中的按鈕
+                        document.querySelectorAll('.theme-button').forEach(btn => btn.classList.remove('selected-theme'));
+                        button.classList.add('selected-theme');
+                        applyTheme(themeKey); // 立即應用主題以預覽
+                    });
+                    themeButtonsContainer.appendChild(button);
+                }
+                // 預設選擇當前 gameConfig 中的主題
+                document.querySelector(`.theme-button[data-theme="${gameConfig.theme}"]`)?.classList.add('selected-theme');
+            }
+
+
+            generatorToggle.addEventListener('click', () => {
+                generatorPanel.classList.toggle('is-open');
+                generatorToggle.innerHTML = generatorPanel.classList.contains('is-open')
+                    ? '<i class="fa-solid fa-gear"></i> 編輯介面 (點擊收起)'
+                    : '<i class="fa-solid fa-gear"></i> 編輯介面 (點擊展開)';
+            });
+
+            applySettingsBtn.addEventListener('click', () => {
+                const jsonText = prizeJsonInput.value;
+                setGameState(gameStates.DISABLED); // Disable game during update
+                generatorMessage.textContent = '處理中...';
+                generatorMessage.className = 'generator-message';
+
+                try {
+                    // --- STEP 1: Process Prize Pool ---
+                    const customPrizes = JSON.parse(jsonText);
+                    if (!Array.isArray(customPrizes) || customPrizes.length === 0) {
+                        throw new Error('獎品池必須是一個非空的 JSON 陣列。');
+                    }
+
+                    const isValid = customPrizes.every(p =>
+                        typeof p === 'object' && p !== null &&
+                        typeof p.name === 'string' && p.name.trim() !== '' &&
+                        typeof p.rate === 'number' && p.rate > 0 && p.rate <= 1 &&
+                        typeof p.asset === 'string' && p.asset.trim() !== '' &&
+                        typeof p.score === 'number' && Number.isInteger(p.score) && p.score >= 0
+                    );
+
+                    if (!isValid) {
+                        throw new Error('陣列內每個獎品必須包含 name (string), rate (number, 0-1), asset (string, 網址或符號), 和 score (integer, >= 0)。');
+                    }
+
+                    // Update the global PRIZE_POOL
+                    PRIZE_POOL = customPrizes;
+                    initializePrizes(); // Re-calculate cumulative rates
+
+                    // --- STEP 2: Apply General Settings ---
+                    applySettings(); 
+
+                    setupPrizes(); // Refresh the prize area display
+
+                    generatorMessage.textContent = `🎉 成功套用 ${PRIZE_POOL.length} 個獎品和所有遊戲設定！遊戲已重置。`;
+                    generatorMessage.className = 'generator-message success';
+                    
+                    resetGame(); // Start a new game with the new settings
+
+                } catch (error) {
+                    console.error('Generator Error:', error);
+                    generatorMessage.textContent = `❌ 套用失敗: 錯誤訊息: ${error.message}`;
+                    generatorMessage.className = 'generator-message error';
+                    setGameState(gameStates.IDLE); // Attempt to re-enable
+                }
+            });
+            
+            downloadZipBtn.addEventListener('click', downloadGameZip);
+
+
+            // Set initial UI state
+            document.getElementById('game-title-input').value = gameConfig.title;
+            document.getElementById('footer-text-input').value = gameConfig.footerText;
+            document.getElementById('initial-tokens-input').value = gameConfig.initialTokens;
+            document.getElementById('grab-cost-input').value = gameConfig.grabCost;
+            document.getElementById('success-rate-input').value = gameConfig.successRate;
+            // document.getElementById('theme-selector').value = gameConfig.theme; // 舊的下拉選單已移除
+        }
+
+        // --- ZIP DOWNLOAD FUNCTIONALITY ---
+
+        function downloadGameZip() {
+            if (typeof JSZip === 'undefined' || typeof saveAs === 'undefined') {
+                document.getElementById('generator-message').textContent = 'ZIP 下載函式庫尚未載入。請稍後再試。';
+                document.getElementById('generator-message').className = 'generator-message error';
+                return;
+            }
+
+            // 1. 取得當前 HTML 內容的拷貝
+            const originalHtml = document.documentElement.outerHTML;
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(originalHtml, 'text/html');
+
+            // 2. 移除生成器相關的 HTML 元素
+            const mainGeneratorTitle = doc.getElementById('main-generator-title');
+            if (mainGeneratorTitle) mainGeneratorTitle.remove();
+
+            const generatorToggleButton = doc.getElementById('generator-toggle');
+            if (generatorToggleButton) generatorToggleButton.remove();
+
+            const generatorPanel = doc.getElementById('generator-panel');
+            if (generatorPanel) generatorPanel.remove();
+
+            const generatorCopyright = doc.getElementById('generator-copyright');
+            if (generatorCopyright) generatorCopyright.remove();
+            
+            const mascotElement = doc.getElementById('liyuchill-mascot');
+            if (mascotElement) mascotElement.remove();
+
+
+            // 3. 移除 JSZip 和 FileSaver 函式庫的 script 標籤 (因為下載的遊戲不需要生成器功能)
+            const jszipScript = doc.querySelector('script[src*="jszip"]');
+            if (jszipScript) jszipScript.remove();
+            const fileSaverScript = doc.querySelector('script[src*="FileSaver"]');
+            if (fileSaverScript) fileSaverScript.remove();
+            // 移除 Font Awesome 連結，因為它僅用於生成器頁面，如果需要離線 Font Awesome，需要將其下載到本地
+            const fontAwesomeLink = doc.querySelector('link[href*="font-awesome"]');
+            if (fontAwesomeLink) fontAwesomeLink.remove();
+
+
+            // 4. 修改 <title> 標籤，使其顯示遊戲標題而不是生成器標題
+            const headTitle = doc.getElementById('dynamic-title');
+            if (headTitle) {
+                // 使用從 gameConfig 獲取的遊戲標題
+                const tempGameConfig = JSON.parse(JSON.stringify(gameConfig)); // 複製一份，避免直接修改
+                // 從 HTML Input 獲取當前設定，因為 gameConfig 可能不是最新狀態
+                const gameTitleInput = document.getElementById('game-title-input');
+                if (gameTitleInput) {
+                    tempGameConfig.title = gameTitleInput.value;
+                }
+                headTitle.textContent = tempGameConfig.title;
+            }
+
+            // 5. 確保 downloaded index.html 的 JS 不再呼叫 setupGenerator()
+            const mainScript = doc.querySelector('script:not([src])'); // 獲取內聯 script
+            if (mainScript) {
+                let scriptContent = mainScript.textContent;
+                // 將 setupGenerator() 的呼叫註釋掉
+                scriptContent = scriptContent.replace('setupGenerator();', '// setupGenerator(); // Generator removed for download');
+                // 並移除 `initAudio()` 後面的 `if (audioContext) return;` 檢查，確保音頻總能初始化
+                scriptContent = scriptContent.replace('if (audioContext) return;', '');
+                mainScript.textContent = scriptContent;
+            }
+
+
+            const zip = new JSZip();
+
+            // 6. 將修改後的 HTML 內容加入 ZIP
+            zip.file("index.html", `<!DOCTYPE html>\n` + doc.documentElement.outerHTML);
+
+            // 7. 加入本地圖片資源說明 (此部分已移除，因為您要求不包含 README)
+            // zip.file("assets/README.txt", instructions); // 移除此行
+            zip.folder("assets").folder("items"); // 建立資料夾結構
+            zip.folder("image"); // 為了確保 LiyuChillGuy.svg 的路徑結構，即使檔案不會在下載版中被使用，也建立資料夾
+
+            // 8. 生成並儲存 ZIP 檔案
+            zip.generateAsync({type:"blob"})
+            .then(function(content) {
+                saveAs(content, "ClawMachine_Game.zip");
+                document.getElementById('generator-message').textContent = '✅ ZIP 檔案已生成並開始下載！';
+                document.getElementById('generator-message').className = 'generator-message success';
+            })
+            .catch(error => {
+                console.error("ZIP Generation Error:", error);
+                document.getElementById('generator-message').textContent = '❌ ZIP 檔案生成失敗！';
+                document.getElementById('generator-message').className = 'generator-message error';
+            });
+        }
+        
+        // --- EVENT LISTENERS AND INITIALIZATION ---
+        
+        document.addEventListener('keydown', (e) => {
+            initAudio(); // 確保音訊上下文在首次用戶交互時被初始化
+
+            if (currentGameState !== gameStates.IDLE) return; 
+
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                moveClaw('left');
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                moveClaw('right');
+            } else if ((e.key === ' ' || e.key === 'Enter') && !grabBtn.disabled) {
+                e.preventDefault();
+                grabPrize();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (currentGameState !== gameStates.IDLE) return; 
+
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' ||
+                e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                stopMove();
+            }
+        });
+
+        moveLeftBtn.addEventListener('mousedown', () => moveClaw('left'));
+        moveRightBtn.addEventListener('mousedown', () => moveClaw('right'));
+        moveLeftBtn.addEventListener('mouseup', stopMove);
+        moveRightBtn.addEventListener('mouseup', stopMove);
+        // Ensure touch events use preventDefault to avoid strange scroll behavior on mobile
+        moveLeftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); moveClaw('left'); });
+        moveRightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); moveClaw('right'); });
+        moveLeftBtn.addEventListener('touchend', stopMove);
+        moveRightBtn.addEventListener('touchend', stopMove);
+
+        grabBtn.addEventListener('click', grabPrize);
+
+        function startGame() {
+            if (gameInitialized) return;
+            initializePrizes();
+            
+            // 只有當 generatorToggle 存在時才執行 setupGenerator
+            // 這確保了下載的遊戲不會呼叫不存在的元素
+            if (document.getElementById('generator-toggle')) {
+                setupGenerator();
+            } else {
+                // 如果沒有生成器，則直接從 gameConfig 預設值開始遊戲
+                // 注意：下載版會直接使用內嵌在 JS 中的 gameConfig 和 PRIZE_POOL
+                // 並且會將 `setupGenerator()` 的呼叫註釋掉。
+            }
+
+            applySettings(); // Apply initial settings and set tokens/score
+            setupPrizes();
+            setGameState(gameStates.IDLE);
+            animationFrameId = requestAnimationFrame(gameLoop);
+            gameInitialized = true;
+        }
+
+        window.onload = startGame;
+        window.addEventListener('resize', () => {
+            setupPrizes(); // Redraw prizes on resize to fix positioning
+            // 重新計算爪子位置，以確保響應式調整後邊界正確
+            updateClawPosition(0); 
+        });
+    </script>
+</body>
+</html>
